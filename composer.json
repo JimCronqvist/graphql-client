@@ -1,0 +1,24 @@
+{
+  "name": "cronqvist/graphql-client",
+  "description": "A GraphQL client for executing queries and mutations",
+  "keywords": ["graphql", "client", "php"],
+  "license": "MIT",
+  "type": "library",
+  "authors": [
+    {
+      "name": "Jim Cronqvist",
+      "email": "jim.cronqvist@gmail.com"
+    }
+  ],
+  "require" : {
+    "php": "^7.0",
+    "guzzlehttp/guzzle": "^6.3"
+  },
+  "minimum-stability": "dev",
+  "prefer-stable": true,
+  "autoload": {
+    "psr-4": {
+      "Jc\\GraphQL\\": "src/"
+    }
+  }
+}
