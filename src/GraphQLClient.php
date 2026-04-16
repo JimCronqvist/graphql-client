@@ -2,9 +2,9 @@
 
 namespace Jc\GraphQL;
 
-use Jc\GraphQL\Exception\GraphQLInvalidResponse;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\RequestException;
+use Jc\GraphQL\Exception\GraphQLInvalidResponse;
 
 class GraphQLClient
 {
@@ -94,18 +94,19 @@ class GraphQLClient
         }
 
         try {
-            $response = $this->guzzle->request('POST', $this->url, [
-                'json' => [
-                    'query' => $query,
-                    'variables' => empty($variables) ? new \stdClass() : $variables
-                ],
-                'headers' => $headers,
-                'http_errors' => true,
-            ]);
+            $options = $this->buildRequestOptions($query, $variables, $headers);
+            $response = $this->guzzle->request('POST', $this->url, $options);
         } catch (RequestException $e) {
             //$request = $e->getRequest();
             $response = $e->getResponse();
-            $err = 'The GraphQL Server responded with a non-200 HTTP status code ('.$response->getStatusCode().' '.$response->getReasonPhrase().'). ';
+            $error = $response->getBody()->getContents();
+
+            if($response) {
+                $err = 'The GraphQL Server responded with a non-200 HTTP status code (' . $response->getStatusCode() . ' ' . $response->getReasonPhrase() . '). ';
+            } else {
+                $err = 'The GraphQL request failed before a response was received. ';
+            }
+
             throw new GraphQLInvalidResponse($err . $e->getMessage(), $e->getCode(), $e);
         }
 
@@ -118,6 +119,108 @@ class GraphQLClient
 
         return new Response($json, $response->getHeaders());
     }
-}
 
-?>
+    /**
+     * @param string $query
+     * @param array $variables
+     * @param array $headers
+     * @return array
+     */
+    protected function buildRequestOptions($query, array $variables, array $headers)
+    {
+        $options = [
+            'headers' => $headers,
+            'http_errors' => true,
+        ];
+
+        $fileMap = [];
+        $mappedVariables = $this->mapFiles($variables, 'variables', $fileMap);
+        if(empty($fileMap)) {
+            $options['json'] = [
+                'query' => $query,
+                'variables' => empty($variables) ? new \stdClass() : $variables,
+            ];
+            return $options;
+        }
+
+        // When files are present - Build multipart request according to GraphQL multipart request specification
+        $operations = [
+            'query' => $query,
+            'variables' => empty($mappedVariables) ? new \stdClass() : $mappedVariables,
+        ];
+
+        $multipart = [
+            [
+                'name' => 'operations',
+                'contents' => json_encode($operations),
+            ],
+        ];
+
+        $map = new \stdClass();
+        foreach(array_values($fileMap) as $index => $file) {
+            $map->{$index} = [$file['path']];
+        }
+
+        $multipart[] = [
+            'name' => 'map',
+            'contents' => json_encode($map),
+        ];
+
+        foreach(array_values($fileMap) as $index => $file) {
+            $part = [
+                'name' => (string) $index,
+                'contents' => $file['contents'],
+            ];
+
+            if($file['filename'] !== null) {
+                $part['filename'] = $file['filename'];
+            }
+
+            if($file['contentType'] !== null) {
+                $part['headers'] = [
+                    'Content-Type' => $file['contentType'],
+                ];
+            }
+
+            $multipart[] = $part;
+        }
+
+        unset($options['headers']['Content-Type']);
+        unset($options['headers']['content-type']);
+
+        $options['multipart'] = $multipart;
+
+        return $options;
+    }
+
+    /**
+     * Walk variables recursively, replace uploads with null, and collect paths.
+     *
+     * @param mixed $value
+     * @param string $path
+     * @param array $fileMap
+     * @return mixed
+     */
+    protected function mapFiles($value, $path, array &$fileMap)
+    {
+        if($value instanceof Upload) {
+            $fileMap[] = [
+                'path' => $path,
+                'contents' => $value->getContents(),
+                'filename' => $value->getFilename(),
+                'contentType' => $value->getContentType(),
+            ];
+            return null;
+        }
+
+        if(is_array($value)) {
+            $mapped = [];
+            foreach($value as $key => $item) {
+                $mapped[$key] = $this->mapFiles($item, $path . '.' . $key, $fileMap);
+            }
+            return $mapped;
+        }
+
+        return $value;
+    }
+}
