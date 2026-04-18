@@ -27,6 +27,20 @@ class GraphQLClient
      */
     protected $guzzle;
 
+    /**
+     * Multipart mode for file uploads
+     *
+     * @var string
+     */
+    protected $multipartMode = 'operations';
+
+    /**
+     * Whether to keep null values for file placeholders in the mapped variables or not. This can be useful when the
+     * server expects the variable to be present even if it is null.
+     *
+     * @var bool
+     */
+    protected $useNullValuesForFilePlaceholder = true;
 
     /**
      * GraphQL Client constructor
@@ -74,6 +88,40 @@ class GraphQLClient
     public function setGuzzle(Client $guzzle)
     {
         $this->guzzle = $guzzle;
+        return $this;
+    }
+
+    /**
+     * Set the mode for multipart file uploads.
+     *
+     * Modes: 'operations' | 'split' | 'query'
+     *
+     * 'operations': multipart request according to GraphQL multipart request specification with operations field
+     * containing query and variables, and file placeholders in the variables referencing the variable path in the
+     * filename of the file part
+     *
+     * 'split': multipart request with query and variables as separate multipart fields, and file placeholders in the
+     * variables referencing the variable path in the filename of the file part
+     *
+     * 'query': multipart request with variables nested in the query field, and file placeholders in the variables
+     * referencing the variable path in the filename of the file part
+     *
+     * Recommendation: The 'operations' mode is the recommended mode and should be used when the server supports the
+     * GraphQL multipart request specification. The 'split' and 'query' modes are legacy modes that can be used for
+     * compatibility with servers that do not support the specification, but they are not recommended for new
+     * implementations.
+     *
+     * @param string $mode 'operations' | 'split' | 'query'
+     */
+    public function useMultipartMode($mode = 'operations')
+    {
+        $this->multipartMode = $mode;
+        return $this;
+    }
+
+    public function useNullValuesForFilePlaceholder($keepNullValues = true)
+    {
+        $this->useNullValuesForFilePlaceholder = $keepNullValues;
         return $this;
     }
 
@@ -143,18 +191,41 @@ class GraphQLClient
             return $options;
         }
 
-        // When files are present - Build multipart request according to GraphQL multipart request specification
-        $operations = [
-            'query' => $query,
-            'variables' => empty($mappedVariables) ? new \stdClass() : $mappedVariables,
-        ];
-
-        $multipart = [
-            [
-                'name' => 'operations',
-                'contents' => json_encode($operations),
-            ],
-        ];
+        if($this->multipartMode === 'operations') {
+            // When files are present - Build multipart request according to GraphQL multipart request specification
+            $multipart = [
+                [
+                    'name' => 'operations',
+                    'contents' => json_encode([
+                        'query' => $query,
+                        'variables' => empty($mappedVariables) ? new \stdClass() : $mappedVariables,
+                    ]),
+                ],
+            ];
+        } else if($this->multipartMode === 'split') {
+            // In legacy mode 'split', we add query and variables as separate multipart fields instead of using the operations field
+            $multipart = [
+                [
+                    'name' => 'query',
+                    'contents' => $query,
+                ],
+                [
+                    'name' => 'variables',
+                    'contents' => json_encode(empty($mappedVariables) ? new \stdClass() : $mappedVariables),
+                ],
+            ];
+        } else if($this->multipartMode === 'query') {
+            // In legacy mode 'query', we nest variables in the query field instead of using the operations field
+            $multipart = [
+                [
+                    'name' => 'query',
+                    'contents' => json_encode([
+                        'query' => $query,
+                        'variables' => empty($mappedVariables) ? new \stdClass() : $mappedVariables,
+                    ]),
+                ],
+            ];
+        }
 
         $map = new \stdClass();
         foreach(array_values($fileMap) as $index => $file) {
@@ -210,13 +281,16 @@ class GraphQLClient
                 'filename' => $value->getFilename(),
                 'contentType' => $value->getContentType(),
             ];
-            return null;
+            return $this->useNullValuesForFilePlaceholder ? null : $value;
         }
 
         if(is_array($value)) {
             $mapped = [];
             foreach($value as $key => $item) {
                 $mapped[$key] = $this->mapFiles($item, $path . '.' . $key, $fileMap);
+                if($mapped[$key] instanceof Upload) {
+                    unset($mapped[$key]);
+                }
             }
             return $mapped;
         }

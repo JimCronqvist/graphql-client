@@ -92,16 +92,21 @@ class Upload
         return new static($stream, $filename, $contentType);
     }
 
-    public static function fromUrl($url, $filename = null, $contentType = null, Client $client = null)
+    public static function fromUrl($url, $filename = null, $contentType = null, $stream = false, Client $client = null)
     {
         $client = $client ?: new Client();
 
         $response = $client->request('GET', $url, [
-            'stream' => true,
+            'stream' => $stream,
             'http_errors' => true,
         ]);
 
-        $stream = $response->getBody();
+        if($stream) {
+            $contentsOrStream = $response->getBody(); // Get the stream directly without reading into memory
+        } else {
+            // Read entire body into memory (seekable via constructor normalization)
+            $contentsOrStream = $response->getBody()->getContents();
+        }
 
         // Detect filename from headers if not provided
         if ($filename === null) {
@@ -122,9 +127,21 @@ class Upload
         // Detect content type from headers if not provided
         if ($contentType === null) {
             $contentType = $response->getHeaderLine('Content-Type') ?: null;
+
+            if ($contentType !== null) {
+                // Strip charset etc.
+                if (strpos($contentType, ';') !== false) {
+                    $contentType = explode(';', $contentType)[0];
+                }
+
+                // Ignore obviously wrong types
+                if ($contentType === 'text/html' || $contentType === '') {
+                    $contentType = null;
+                }
+            }
         }
 
-        return new static($stream, $filename, $contentType);
+        return new static($contentsOrStream, $filename, $contentType);
     }
 
     public static function fromFile($file)
