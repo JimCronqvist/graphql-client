@@ -157,6 +157,7 @@ class Response implements JsonSerializable
      *
      * @return mixed|null
      */
+    #[\ReturnTypeWillChange]
     public function jsonSerialize()
     {
         return $this->data;

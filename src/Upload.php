@@ -92,7 +92,7 @@ class Upload
         return new static($stream, $filename, $contentType);
     }
 
-    public static function fromUrl($url, $filename = null, $contentType = null, $stream = false, Client $client = null)
+    public static function fromUrl($url, $filename = null, $contentType = null, $stream = false, ?Client $client = null)
     {
         $client = $client ?: new Client();
 
